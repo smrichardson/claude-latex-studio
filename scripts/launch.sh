@@ -11,6 +11,14 @@ PORT=4319
 export PATH="$HOME/.local/node/bin:/opt/homebrew/bin:/usr/local/bin:/Library/TeX/texbin:/usr/bin:/bin"
 command -v node >/dev/null 2>&1 || { osascript -e 'display alert "node not found" message "Install Node and ensure it is on PATH."'; exit 1; }
 
+# Optional config: ~/.latex-claude-studio.env can set STUDIO_PROJECT / STUDIO_MAIN
+# to open a specific project folder (so the dock app isn't pinned to ./project).
+if [ -f "$HOME/.latex-claude-studio.env" ]; then
+  set -a
+  . "$HOME/.latex-claude-studio.env"
+  set +a
+fi
+
 cd "$APP_DIR"
 
 # Build the frontend once if it has not been built.
