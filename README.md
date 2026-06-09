@@ -64,8 +64,11 @@ and opens a chromeless app window. (The app is an AppleScript launcher around
      inserted at the cursor — no manual file wrangling.
    - The template preamble ships with common **stats/ML packages and macros**
      (`mathtools`, `bm`, `booktabs`, `algorithm`, `cleveref`, theorem envs, and macros like
-     `\E \Var \argmin \norm \indep \Normal`). **Hide preamble** in the EDITOR header folds
-     it away so you can focus on the body.
+     `\E \Var \Cov \argmin \norm \indep \Normal \convd`). **Hide preamble** in the EDITOR
+     header folds it away so you can focus on the body.
+   - **Your custom macros render in the live preview too.** The rich-text view parses the
+     `\newcommand`/`\DeclareMathOperator` definitions from your preamble and feeds them to
+     KaTeX, so `$\E[X]$` shows as 𝔼[X] inline — define a new macro and it just works.
 4. **Let Claude write.** Tick **Edit mode** and ask e.g.
    *“Add this paper to the Themes section with a citation, and add its BibTeX entry.”*
    Claude edits `main.tex` **and** `references.bib`; the editor reloads and recompiles.
