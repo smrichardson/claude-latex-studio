@@ -1,0 +1,31 @@
+{
+  "name": "latex-claude-studio",
+  "version": "0.1.0",
+  "description": "A minimal, local Overleaf-style LaTeX workspace for reading papers and writing them up, with Claude Code built in.",
+  "license": "MIT",
+  "repository": "github:smrichardson/claude-latex-studio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "backend": "node server.mjs",
+    "frontend": "vite --port 4318",
+    "dev": "node server.mjs & vite --port 4318",
+    "build": "vite build",
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.1",
+    "@codemirror/language": "^6.12.1",
+    "@codemirror/lint": "^6.8.4",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.39.11",
+    "codemirror": "^6.0.1",
+    "codemirror-lang-latex": "^0.2.0",
+    "katex": "^0.16.28",
+    "pdfjs-dist": "^4.10.38"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

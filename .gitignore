@@ -1,0 +1,29 @@
+# deps & build
+node_modules/
+dist/
+
+# generated macOS app (machine-specific absolute path — generate with scripts/make-macos-app.sh)
+*.app/
+
+# LaTeX build artifacts
+project/main.pdf
+project/main.synctex.gz
+project/main.aux
+project/main.log
+project/main.fdb_latexmk
+project/main.fls
+project/main.bbl
+project/main.blg
+project/main.out
+project/main.toc
+project/*.bak
+
+# runtime / user content
+project/.captures/
+project/papers/.highlights.json
+
+# Don't publish real papers (copyright) — keep only the bundled sample.
+project/papers/*.pdf
+!project/papers/sample-paper.pdf
+
+.DS_Store
