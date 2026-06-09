@@ -34,8 +34,10 @@ if ! curl -s -o /dev/null "http://localhost:$PORT/api/papers"; then
   done
 fi
 
-# Open a standalone (no tabs / no address bar) app window in its own profile,
-# so it shows up as its own window rather than a tab in your main browser.
-open -na "Google Chrome" --args \
-  --app="http://localhost:$PORT" \
-  --user-data-dir="$HOME/.latex-claude-studio-chrome"
+# Prefer the installed PWA (it has its own ∫ dock icon). If it isn't installed
+# yet, fall back to a chromeless Chrome app window in its own profile.
+if ! open -a "LaTeX · Claude Studio" 2>/dev/null; then
+  open -na "Google Chrome" --args \
+    --app="http://localhost:$PORT" \
+    --user-data-dir="$HOME/.latex-claude-studio-chrome"
+fi

@@ -22,5 +22,16 @@ APPLE
 osacompile -o "$BUNDLE" "$TMP_SCPT"
 rm -f "$TMP_SCPT"
 
+# Apply the ∫ app icon (built from public/icon-512.png).
+ICON_SRC="$APP_DIR/public/icon-512.png"
+if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
+  ISET="$(mktemp -d)/icon.iconset"; mkdir -p "$ISET"
+  for s in 16 32 64 128 256 512; do
+    sips -z "$s" "$s" "$ICON_SRC" --out "$ISET/icon_${s}x${s}.png" >/dev/null 2>&1
+    sips -z "$((s * 2))" "$((s * 2))" "$ICON_SRC" --out "$ISET/icon_${s}x${s}@2x.png" >/dev/null 2>&1
+  done
+  iconutil -c icns "$ISET" -o "$BUNDLE/Contents/Resources/applet.icns" 2>/dev/null
+fi
+
 echo "Created: $BUNDLE"
 echo "Drag it to your Dock (or Applications), then click to launch."
