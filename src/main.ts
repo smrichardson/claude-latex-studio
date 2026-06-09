@@ -21,6 +21,7 @@ const pdfContainer = $("pdf");
 const logEl = $("log");
 const promptEl = $<HTMLTextAreaElement>("prompt");
 const paperSelect = $<HTMLSelectElement>("paper-select");
+const texSelect = $<HTMLSelectElement>("tex-select");
 const paperPdfEl = $("paper-pdf");
 const paperEmpty = $("paper-empty");
 const ctxEl = $("ctx");
@@ -103,6 +104,7 @@ function setEditorContent(text: string) {
 }
 
 // --- file sync + compile --------------------------------------------------
+let activeTex = ""; // the .tex file currently being edited (relative to project)
 let saveTimer: number | undefined;
 function scheduleSave() {
   saveStateEl.textContent = "unsaved…";
@@ -114,7 +116,7 @@ async function saveFile() {
   await fetch("/api/file", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content: view.state.doc.toString() }),
+    body: JSON.stringify({ name: activeTex, content: view.state.doc.toString() }),
   });
   saveStateEl.textContent = "saved";
 }
@@ -122,9 +124,13 @@ async function saveFile() {
 async function compile() {
   setStatus("compiling…");
   try {
-    const r = await fetch("/api/compile", { method: "POST" }).then((x) => x.json());
+    const r = await fetch("/api/compile", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: activeTex }),
+    }).then((x) => x.json());
     if (r.ok) {
-      await renderCompiled(`/api/pdf?t=${Date.now()}`);
+      await renderCompiled(`/api/pdf?name=${encodeURIComponent(activeTex)}&t=${Date.now()}`);
       setStatus("compiled ✓", "ok");
     } else {
       setStatus("compile error — see chat", "err");
@@ -139,6 +145,35 @@ async function saveAndCompile() {
   await saveFile();
   await compile();
 }
+
+/** Open a .tex file: load its content, make it the active file, compile it. */
+async function openTex(name: string) {
+  activeTex = name;
+  localStorage.setItem("activeTex", name);
+  texSelect.value = name;
+  const { content } = await fetch(`/api/file?name=${encodeURIComponent(name)}`).then((x) => x.json());
+  setEditorContent(content);
+  saveStateEl.textContent = "saved";
+  await compile();
+}
+
+/** Populate the .tex file picker and open the remembered (or default) one. */
+async function loadTexFiles() {
+  const r = await fetch("/api/texfiles").then((x) => x.json());
+  const files: string[] = r.files || [];
+  texSelect.innerHTML = files
+    .map((f) => `<option value="${f.replace(/"/g, "&quot;")}">${f.replace(/\.tex$/i, "")}</option>`)
+    .join("");
+  const stored = localStorage.getItem("activeTex") || "";
+  const pick = files.includes(stored) ? stored : files.includes(r.default) ? r.default : files[0] || r.default;
+  await openTex(pick);
+}
+
+texSelect.addEventListener("change", async () => {
+  clearTimeout(saveTimer);
+  await saveFile(); // flush the current file before switching
+  await openTex(texSelect.value);
+});
 
 function lastLatexError(log: string): string {
   const lines = (log || "").split("\n");
@@ -218,41 +253,109 @@ async function renderPdfInto(
   return pages;
 }
 
-// --- compiled PDF (clickable → SyncTeX) ----------------------------------
-const compiledToken = { v: 0 };
-let compiledZoom = 1;
-let lastCompiledUrl = "";
+// --- highlightable PDF panes (paper + compiled share one implementation) --
+interface Highlight {
+  page: number;
+  x0: number; // all fractions of page size, so they survive zoom/resize
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
-async function renderCompiled(url: string) {
-  lastCompiledUrl = url;
-  const pages = await renderPdfInto(pdfContainer, url, compiledToken, compiledZoom);
-  if (!pages) return;
+interface HLPane {
+  el: HTMLElement;
+  token: { v: number };
+  pages: PageInfo[];
+  list: Highlight[];
+  mode: boolean; // highlight (draw) mode on?
+  zoom: number;
+  key: () => string | null; // storage key for this pane's current document
+  withAsk: boolean; // show the 💬 discuss-with-Claude button (paper only)
+  onBareClick?: (e: MouseEvent, p: PageInfo) => void; // when NOT in highlight mode (SyncTeX)
+  lastUrl: string;
+  reRender: () => void;
+  saveTimer?: number;
+}
+
+let pendingCapture: string | null = null; // a cropped region queued for the next chat message
+
+const compiledPane: HLPane = {
+  el: pdfContainer,
+  token: { v: 0 },
+  pages: [],
+  list: [],
+  mode: false,
+  zoom: 1,
+  key: () => (activeTex ? `compiled:${activeTex}` : null),
+  withAsk: false,
+  onBareClick: onSyncClick,
+  lastUrl: "",
+  reRender: () => {
+    if (compiledPane.lastUrl) renderPane(compiledPane, compiledPane.lastUrl);
+  },
+};
+
+const paperPane: HLPane = {
+  el: paperPdfEl,
+  token: { v: 0 },
+  pages: [],
+  list: [],
+  mode: false,
+  zoom: 1,
+  key: () => selectedPaper() || null,
+  withAsk: true,
+  lastUrl: "",
+  reRender: () => {
+    const n = selectedPaper();
+    if (n) renderPaper(n);
+  },
+};
+
+/** Render a PDF into a pane and wire up highlights + (optional) SyncTeX clicks. */
+async function renderPane(pane: HLPane, url: string) {
+  pane.lastUrl = url;
+  const key = pane.key();
+  pane.list = key
+    ? (await fetch(`/api/highlights?paper=${encodeURIComponent(key)}`).then((r) => r.json())).highlights || []
+    : [];
+  const pages = await renderPdfInto(pane.el, url, pane.token, pane.zoom);
+  if (!pages) {
+    pane.pages = [];
+    return;
+  }
+  pane.pages = pages;
+  pane.el.classList.toggle("hl-mode", pane.mode);
   for (const p of pages) {
-    p.overlay.addEventListener("click", (e) => onSyncClick(e as MouseEvent, p));
+    attachDraw(pane, p);
+    if (pane.onBareClick) {
+      p.overlay.addEventListener("click", (e) => {
+        if (!pane.mode) pane.onBareClick!(e as MouseEvent, p);
+      });
+    }
   }
+  drawPaneHighlights(pane);
 }
 
-/** Zoom helper: nudge a zoom level by a step and re-render. */
+const renderCompiled = (url: string) => renderPane(compiledPane, url);
+const renderPaper = (name: string) =>
+  renderPane(paperPane, `/api/paper?name=${encodeURIComponent(name)}&t=${Date.now()}`);
+
+/** Zoom: nudge a pane's zoom and re-render. */
 function nudgeZoom(which: "compiled" | "paper", dir: 1 | -1) {
-  const factor = dir > 0 ? 1.2 : 1 / 1.2;
-  if (which === "compiled") {
-    compiledZoom = Math.max(0.4, Math.min(3, compiledZoom * factor));
-    if (lastCompiledUrl) renderCompiled(lastCompiledUrl);
-  } else {
-    paperZoom = Math.max(0.4, Math.min(3, paperZoom * factor));
-    const name = selectedPaper();
-    if (name) renderPaper(name);
-  }
+  const pane = which === "compiled" ? compiledPane : paperPane;
+  pane.zoom = Math.max(0.4, Math.min(3, pane.zoom * (dir > 0 ? 1.2 : 1 / 1.2)));
+  pane.reRender();
 }
 
-/** Click in the compiled PDF → ask SyncTeX for the source line → jump there. */
+/** Click in the compiled PDF (not in highlight mode) → SyncTeX → jump to source. */
 async function onSyncClick(e: MouseEvent, p: PageInfo) {
   const rect = p.overlay.getBoundingClientRect();
   const lx = e.clientX - rect.left;
   const ly = e.clientY - rect.top;
   try {
     const { line } = await fetch(
-      `/api/synctex?page=${p.pageNum}&x=${(lx / p.scale).toFixed(2)}&y=${(ly / p.scale).toFixed(2)}`,
+      `/api/synctex?name=${encodeURIComponent(activeTex)}&page=${p.pageNum}` +
+        `&x=${(lx / p.scale).toFixed(2)}&y=${(ly / p.scale).toFixed(2)}`,
     ).then((r) => r.json());
     if (line) {
       jumpToLine(line);
@@ -273,7 +376,6 @@ function jumpToLine(line: number) {
   view.focus();
 }
 
-/** Brief flash where you clicked, for feedback. */
 function flashAt(wrap: HTMLElement, x: number, y: number) {
   const f = document.createElement("div");
   f.className = "flash";
@@ -286,46 +388,10 @@ function flashAt(wrap: HTMLElement, x: number, y: number) {
   setTimeout(() => f.remove(), 650);
 }
 
-// --- paper PDF (highlightable) -------------------------------------------
-interface Highlight {
-  page: number;
-  x0: number; // all fractions of page size, so they survive zoom/resize
-  y0: number;
-  x1: number;
-  y1: number;
-}
-
-const paperToken = { v: 0 };
-let paperPages: PageInfo[] = [];
-let paperHighlights: Highlight[] = [];
-let highlightModeOn = false;
-let paperZoom = 1;
-let pendingCapture: string | null = null; // a cropped region queued for the next chat message
-
-async function renderPaper(name: string) {
-  paperHighlights =
-    (await fetch(`/api/highlights?paper=${encodeURIComponent(name)}`).then((r) => r.json()))
-      .highlights || [];
-  const pages = await renderPdfInto(
-    paperPdfEl,
-    `/api/paper?name=${encodeURIComponent(name)}&t=${Date.now()}`,
-    paperToken,
-    paperZoom,
-  );
-  if (!pages) {
-    paperPages = [];
-    return;
-  }
-  paperPages = pages;
-  paperPdfEl.classList.toggle("hl-mode", highlightModeOn);
-  for (const p of pages) attachHighlightDrawing(p);
-  drawHighlights();
-}
-
 /** Drag on a page (in highlight mode) to add a rectangle highlight. */
-function attachHighlightDrawing(p: PageInfo) {
+function attachDraw(pane: HLPane, p: PageInfo) {
   p.overlay.addEventListener("mousedown", (e) => {
-    if (!highlightModeOn) return;
+    if (!pane.mode) return;
     e.preventDefault();
     const rect = p.overlay.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -349,26 +415,26 @@ function attachHighlightDrawing(p: PageInfo) {
       const cx = clamp(ev.clientX - rect.left, p.cssW);
       const cy = clamp(ev.clientY - rect.top, p.cssH);
       if (Math.abs(cx - sx) < 6 || Math.abs(cy - sy) < 6) return; // ignore stray clicks
-      paperHighlights.push({
+      pane.list.push({
         page: p.pageNum,
         x0: Math.min(sx, cx) / p.cssW,
         y0: Math.min(sy, cy) / p.cssH,
         x1: Math.max(sx, cx) / p.cssW,
         y1: Math.max(sy, cy) / p.cssH,
       });
-      saveHighlights();
-      drawHighlights();
+      savePaneHighlights(pane);
+      drawPaneHighlights(pane);
     };
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
   });
 }
 
-/** Re-paint all highlight rectangles from the model. Click one to remove it. */
-function drawHighlights() {
-  for (const p of paperPages) {
+/** Re-paint a pane's highlight rectangles. Hover for remove (and discuss, on paper). */
+function drawPaneHighlights(pane: HLPane) {
+  for (const p of pane.pages) {
     p.overlay.querySelectorAll(".hl").forEach((n) => n.remove());
-    paperHighlights.forEach((hl, idx) => {
+    pane.list.forEach((hl, idx) => {
       if (hl.page !== p.pageNum) return;
       const d = document.createElement("div");
       d.className = "hl";
@@ -377,41 +443,42 @@ function drawHighlights() {
       d.style.width = `${(hl.x1 - hl.x0) * p.cssW}px`;
       d.style.height = `${(hl.y1 - hl.y0) * p.cssH}px`;
 
-      // Hover buttons: 💬 discuss with Claude, ✕ remove.
-      const ask = document.createElement("button");
-      ask.className = "hl-btn hl-ask";
-      ask.textContent = "💬";
-      ask.title = "Discuss this region with Claude";
-      ask.addEventListener("click", (e) => {
-        e.stopPropagation();
-        askAboutHighlight(p, hl);
-      });
+      if (pane.withAsk) {
+        const ask = document.createElement("button");
+        ask.className = "hl-btn hl-ask";
+        ask.textContent = "💬";
+        ask.title = "Discuss this region with Claude";
+        ask.addEventListener("click", (e) => {
+          e.stopPropagation();
+          askAboutHighlight(p, hl);
+        });
+        d.append(ask);
+      }
       const rm = document.createElement("button");
       rm.className = "hl-btn hl-rm";
       rm.textContent = "✕";
       rm.title = "Remove highlight";
       rm.addEventListener("click", (e) => {
         e.stopPropagation();
-        paperHighlights.splice(idx, 1);
-        saveHighlights();
-        drawHighlights();
+        pane.list.splice(idx, 1);
+        savePaneHighlights(pane);
+        drawPaneHighlights(pane);
       });
-      d.append(ask, rm);
+      d.append(rm);
       p.overlay.appendChild(d);
     });
   }
 }
 
-let saveHlTimer: number | undefined;
-function saveHighlights() {
-  const paper = selectedPaper();
-  if (!paper) return;
-  clearTimeout(saveHlTimer);
-  saveHlTimer = window.setTimeout(() => {
+function savePaneHighlights(pane: HLPane) {
+  const key = pane.key();
+  if (!key) return;
+  clearTimeout(pane.saveTimer);
+  pane.saveTimer = window.setTimeout(() => {
     fetch("/api/highlights", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ paper, highlights: paperHighlights }),
+      body: JSON.stringify({ paper: key, highlights: pane.list }),
     });
   }, 250);
 }
@@ -450,6 +517,17 @@ $("toggle-rt").addEventListener("click", () => {
   btn.classList.toggle("on", richTextOn);
 });
 $("compile").addEventListener("click", saveAndCompile);
+$("save-btn").addEventListener("click", () => {
+  clearTimeout(saveTimer);
+  saveAndCompile();
+});
+window.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+    e.preventDefault(); // Cmd/Ctrl+S = save now
+    clearTimeout(saveTimer);
+    saveAndCompile();
+  }
+});
 
 // theme switcher
 function applyTheme(name: string) {
@@ -556,9 +634,9 @@ function showPaper(name: string) {
     renderPaper(name);
   } else {
     localStorage.removeItem("lastPaper");
-    paperToken.v++; // cancel any in-flight render
-    paperPages = [];
-    paperHighlights = [];
+    paperPane.token.v++; // cancel any in-flight render
+    paperPane.pages = [];
+    paperPane.list = [];
     paperPdfEl.innerHTML = "";
     paperPdfEl.style.display = "none";
     paperEmpty.style.display = "block";
@@ -585,6 +663,30 @@ async function loadPapers(selectName?: string) {
 
 paperSelect.addEventListener("change", () => showPaper(selectedPaper()));
 $("paper-refresh").addEventListener("click", () => loadPapers());
+$("paper-tidy").addEventListener("click", async () => {
+  if (
+    !confirm(
+      "Rename arXiv-numbered / cryptic PDFs to readable “Author Year - Title” names?\nClaude reads each (~10-15s per paper).",
+    )
+  )
+    return;
+  const prev = selectedPaper();
+  setStatus("tidying paper names…");
+  try {
+    const r = await fetch("/api/rename-papers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    }).then((x) => x.json());
+    const map = Object.fromEntries((r.renamed || []).map((x: { from: string; to: string }) => [x.from, x.to]));
+    await loadPapers(map[prev] || prev);
+    const n = r.renamed?.length || 0;
+    setStatus(n ? `renamed ${n} paper(s) ✓` : "nothing to tidy", n ? "ok" : "");
+    if (n) addMsg("sys", "Renamed:\n" + r.renamed.map((x: { to: string }) => `• ${x.to}`).join("\n"));
+  } catch {
+    setStatus("rename failed", "err");
+  }
+});
 $("paper-upload-btn").addEventListener("click", () => $<HTMLInputElement>("paper-file").click());
 $<HTMLInputElement>("paper-file").addEventListener("change", async (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
@@ -600,11 +702,13 @@ $<HTMLInputElement>("paper-file").addEventListener("change", async (e) => {
 });
 
 // highlight mode + clear
-$("hl-toggle").addEventListener("click", () => {
-  highlightModeOn = !highlightModeOn;
-  $("hl-toggle").classList.toggle("on", highlightModeOn);
-  paperPdfEl.classList.toggle("hl-mode", highlightModeOn);
-});
+function toggleHighlightMode(pane: HLPane, btnId: string) {
+  pane.mode = !pane.mode;
+  $(btnId).classList.toggle("on", pane.mode);
+  pane.el.classList.toggle("hl-mode", pane.mode);
+}
+$("hl-toggle").addEventListener("click", () => toggleHighlightMode(paperPane, "hl-toggle"));
+$("chl-toggle").addEventListener("click", () => toggleHighlightMode(compiledPane, "chl-toggle"));
 $("pz-out").addEventListener("click", () => nudgeZoom("paper", -1));
 $("pz-in").addEventListener("click", () => nudgeZoom("paper", 1));
 $("cz-out").addEventListener("click", () => nudgeZoom("compiled", -1));
@@ -750,9 +854,6 @@ function initResizers() {
   restoreTranscript();
   updateCtx();
   setStatus("loading…");
-  const { content } = await fetch("/api/file").then((x) => x.json());
-  setEditorContent(content);
-  saveStateEl.textContent = "saved";
   await loadPapers();
-  await compile();
+  await loadTexFiles(); // sets the active .tex, loads it, and compiles
 })();

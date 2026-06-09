@@ -11,17 +11,22 @@
  */
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { readFile, writeFile, stat, readdir, mkdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, mkdir, rename } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, basename, extname, normalize } from "node:path";
+import { dirname, join, basename, extname, normalize, resolve, relative } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_DIR = join(__dirname, "project");
+// The project folder is configurable, so you can keep several writeups (or point
+// at an existing project). STUDIO_PROJECT = path to the folder; STUDIO_MAIN = the
+// main .tex filename within it (default main.tex).
+const PROJECT_DIR = resolve(process.env.STUDIO_PROJECT || join(__dirname, "project"));
 const DIST_DIR = join(__dirname, "dist"); // built frontend (vite build) for production
 const PAPERS_DIR = join(PROJECT_DIR, "papers");
-const MAIN_TEX = join(PROJECT_DIR, "main.tex");
-const MAIN_PDF = join(PROJECT_DIR, "main.pdf");
+const MAIN_NAME = process.env.STUDIO_MAIN || "main.tex";
+const MAIN_PDF_NAME = MAIN_NAME.replace(/\.tex$/i, ".pdf");
+const MAIN_TEX = join(PROJECT_DIR, MAIN_NAME);
+const MAIN_PDF = join(PROJECT_DIR, MAIN_PDF_NAME);
 const PORT = 4319;
 
 // Call binaries directly with an explicit PATH so we never trigger the user's
@@ -100,30 +105,77 @@ const safeName = (n) => basename(String(n || "")).replace(/[^\w.\- ]/g, "_");
 
 // --- handlers -------------------------------------------------------------
 
-/** GET /api/file -> { content } */
-async function getFile(_req, res) {
-  const content = await readFile(MAIN_TEX, "utf8").catch(() => "");
-  json(res, 200, { content });
+/**
+ * Resolve a .tex file (may be in a subfolder) safely under PROJECT_DIR. Empty or
+ * non-.tex input falls back to the default main file. Also derives the matching
+ * PDF path and the directory latexmk/synctex should run in.
+ */
+function safeTexPath(p) {
+  let rel = normalize(String(p || "")).replace(/^([./\\])+/, "");
+  if (!rel || !/\.tex$/i.test(rel)) rel = MAIN_NAME;
+  const full = join(PROJECT_DIR, rel);
+  if (full !== PROJECT_DIR && !full.startsWith(PROJECT_DIR + "/")) return null;
+  const pdfRel = rel.replace(/\.tex$/i, ".pdf");
+  return {
+    rel,
+    full,
+    dir: dirname(full),
+    base: basename(full),
+    pdfFull: join(PROJECT_DIR, pdfRel),
+    pdfBase: basename(pdfRel),
+  };
 }
 
-/** POST /api/file { content } -> { ok } */
+/** Recursively collect *.tex paths under PROJECT_DIR (relative). */
+async function walkTex(dir) {
+  let out = [];
+  for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "dist") continue;
+    const full = join(dir, e.name);
+    if (e.isDirectory()) out = out.concat(await walkTex(full));
+    else if (/\.tex$/i.test(e.name)) out.push(relative(PROJECT_DIR, full));
+  }
+  return out;
+}
+
+/** GET /api/texfiles -> { files: [...], default } */
+async function listTexFiles(_req, res) {
+  await mkdir(PROJECT_DIR, { recursive: true });
+  const files = (await walkTex(PROJECT_DIR)).sort((a, b) => a.localeCompare(b));
+  if (!files.includes(MAIN_NAME)) files.unshift(MAIN_NAME);
+  json(res, 200, { files, default: MAIN_NAME });
+}
+
+/** GET /api/file?name=foo.tex -> { content, name } */
+async function getFile(req, res) {
+  const sp = safeTexPath(new URL(req.url, "http://localhost").searchParams.get("name"));
+  const content = sp ? await readFile(sp.full, "utf8").catch(() => "") : "";
+  json(res, 200, { content, name: sp ? sp.rel : MAIN_NAME });
+}
+
+/** POST /api/file { name, content } -> { ok } */
 async function putFile(req, res) {
-  const { content } = await readJsonBody(req);
-  await writeFile(MAIN_TEX, content ?? "", "utf8");
+  const { name, content } = await readJsonBody(req);
+  const sp = safeTexPath(name);
+  if (!sp) return json(res, 400, { ok: false });
+  await mkdir(sp.dir, { recursive: true });
+  await writeFile(sp.full, content ?? "", "utf8");
   json(res, 200, { ok: true });
 }
 
-/** POST /api/compile -> { ok, log } and writes project/main.pdf */
-async function compile(_req, res) {
+/** POST /api/compile { name } -> { ok, log }; compiles the given .tex in its folder. */
+async function compile(req, res) {
+  const body = await readJsonBody(req).catch(() => ({}));
+  const sp = safeTexPath(body.name);
+  if (!sp) return json(res, 400, { ok: false });
   const r = await run(
     "latexmk",
-    // -synctex=1 emits main.synctex.gz so the PDF can map back to source lines.
-    ["-pdf", "-synctex=1", "-interaction=nonstopmode", "-halt-on-error", "-file-line-error", "main.tex"],
-    { cwd: PROJECT_DIR, timeoutMs: 90_000 },
+    ["-pdf", "-synctex=1", "-interaction=nonstopmode", "-halt-on-error", "-file-line-error", sp.base],
+    { cwd: sp.dir, timeoutMs: 90_000 },
   );
   let pdfOk = false;
   try {
-    pdfOk = (await stat(MAIN_PDF)).size > 0;
+    pdfOk = (await stat(sp.pdfFull)).size > 0;
   } catch {
     pdfOk = false;
   }
@@ -135,47 +187,129 @@ async function compile(_req, res) {
   });
 }
 
-/** GET /api/pdf -> the compiled PDF bytes (cache-busted by the client). */
-async function getPdf(_req, res) {
+/** GET /api/pdf?name=foo.tex -> the compiled PDF bytes for that file. */
+async function getPdf(req, res) {
+  const sp = safeTexPath(new URL(req.url, "http://localhost").searchParams.get("name"));
+  if (!sp) return void res.writeHead(400).end("bad path");
   try {
-    await stat(MAIN_PDF);
+    await stat(sp.pdfFull);
   } catch {
     res.writeHead(404).end("no pdf yet");
     return;
   }
   res.writeHead(200, { "content-type": "application/pdf", "cache-control": "no-store" });
-  createReadStream(MAIN_PDF).pipe(res);
+  createReadStream(sp.pdfFull).pipe(res);
 }
 
-/** GET /api/papers -> { papers: ["a.pdf", ...] } */
+/** Resolve a paper path (may include subfolders) safely under PAPERS_DIR. */
+function safePaperPath(p) {
+  const rel = normalize(String(p || "")).replace(/^([./\\])+/, "");
+  const full = join(PAPERS_DIR, rel);
+  if (full !== PAPERS_DIR && !full.startsWith(PAPERS_DIR + "/")) return null;
+  return { rel, full };
+}
+
+/** Recursively collect *.pdf paths under PAPERS_DIR (so subfolders work). */
+async function walkPdfs(dir) {
+  let out = [];
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue;
+    const full = join(dir, e.name);
+    if (e.isDirectory()) out = out.concat(await walkPdfs(full));
+    else if (/\.pdf$/i.test(e.name)) out.push(relative(PAPERS_DIR, full));
+  }
+  return out;
+}
+
+/** GET /api/papers -> { papers: ["a.pdf", "readings/b.pdf", ...] } */
 async function listPapers(_req, res) {
   await mkdir(PAPERS_DIR, { recursive: true });
-  const all = await readdir(PAPERS_DIR).catch(() => []);
-  const papers = all.filter((f) => /\.pdf$/i.test(f)).sort();
+  const papers = (await walkPdfs(PAPERS_DIR)).sort((a, b) => a.localeCompare(b));
   json(res, 200, { papers });
 }
 
-/** GET /api/paper?name=foo.pdf -> the PDF bytes */
+/** GET /api/paper?name=readings/foo.pdf -> the PDF bytes */
 async function getPaper(req, res) {
-  const name = safeName(new URL(req.url, "http://localhost").searchParams.get("name"));
-  const path = join(PAPERS_DIR, name);
+  const sp = safePaperPath(new URL(req.url, "http://localhost").searchParams.get("name"));
+  if (!sp) return void res.writeHead(400).end("bad path");
   try {
-    await stat(path);
+    await stat(sp.full);
   } catch {
     res.writeHead(404).end("no such paper");
     return;
   }
   res.writeHead(200, { "content-type": "application/pdf", "cache-control": "no-store" });
-  createReadStream(path).pipe(res);
+  createReadStream(sp.full).pipe(res);
 }
 
 /** POST /api/paper?name=foo.pdf  (raw PDF body) -> { ok, name } */
 async function uploadPaper(req, res) {
-  const name = safeName(new URL(req.url, "http://localhost").searchParams.get("name") || "paper.pdf");
-  await mkdir(PAPERS_DIR, { recursive: true });
-  const buf = await readRawBody(req);
-  await writeFile(join(PAPERS_DIR, name), buf);
-  json(res, 200, { ok: true, name });
+  const sp = safePaperPath(new URL(req.url, "http://localhost").searchParams.get("name") || "paper.pdf");
+  if (!sp) return void res.writeHead(400).end("bad path");
+  await mkdir(dirname(sp.full), { recursive: true });
+  await writeFile(sp.full, await readRawBody(req));
+  json(res, 200, { ok: true, name: sp.rel });
+}
+
+/**
+ * POST /api/rename-papers { onlyCryptic } -> { renamed: [{from,to}], skipped }
+ * Reads each (cryptically-named) PDF with Claude and renames it to a readable
+ * "Author Year - Title.pdf", keeping it in the same subfolder and migrating its
+ * highlights. Default targets arXiv-id / all-number filenames only.
+ */
+async function renamePapers(req, res) {
+  const body = await readJsonBody(req).catch(() => ({}));
+  const onlyCryptic = body.onlyCryptic !== false;
+  const cryptic = /(^|\/)(\d{4}\.\d{4,5}(v\d+)?|\d{6,}|[0-9a-f]{8,})\.pdf$/i;
+  const papers = await walkPdfs(PAPERS_DIR);
+  const targets = papers.filter((p) => !onlyCryptic || cryptic.test(p));
+  const highlights = await readHighlights();
+  const renamed = [];
+
+  for (const rel of targets) {
+    const sp = safePaperPath(rel);
+    if (!sp) continue;
+    const r = await run(
+      "claude",
+      [
+        "-p",
+        `Read the PDF at papers/${rel} and reply with ONLY a filename for it and nothing else. ` +
+          `Format: "FirstAuthorLastName Year - Short Title.pdf" (max ~90 chars, no slashes/quotes).`,
+        "--output-format",
+        "json",
+        "--allowed-tools",
+        "Read",
+      ],
+      { cwd: PROJECT_DIR, timeoutMs: 150_000 },
+    );
+    let name = (parseClaudeJson(r.stdout).text || "").trim().split("\n").pop().trim();
+    name = name
+      .replace(/^["']|["']$/g, "")
+      .replace(/[/\\]/g, "-")
+      .replace(/[^\w.\-() ]/g, "")
+      .trim();
+    if (!name) continue;
+    if (!/\.pdf$/i.test(name)) name += ".pdf";
+
+    const dir = dirname(rel);
+    const prefix = dir === "." ? "" : `${dir}/`;
+    let target = prefix + name;
+    let n = 1;
+    // collision-avoid
+    while (await stat(join(PAPERS_DIR, target)).then(() => true).catch(() => false)) {
+      target = `${prefix}${name.replace(/\.pdf$/i, "")} (${n++}).pdf`;
+    }
+    await rename(sp.full, join(PAPERS_DIR, target));
+    if (highlights[rel]) {
+      highlights[target] = highlights[rel];
+      delete highlights[rel];
+    }
+    renamed.push({ from: rel, to: target });
+  }
+
+  await writeFile(HIGHLIGHTS_FILE, JSON.stringify(highlights, null, 2)).catch(() => {});
+  json(res, 200, { renamed, considered: targets.length });
 }
 
 const FIGURES_DIR = join(PROJECT_DIR, "figures");
@@ -210,22 +344,26 @@ async function readHighlights() {
   }
 }
 
-/** GET /api/highlights?paper=foo.pdf -> { highlights: [...] } (for one paper) */
+// Highlights are stored under an arbitrary string key: a paper's relative path,
+// or "compiled:<texfile>" for the compiled-PDF pane. It's only ever a JSON key.
+const hlKey = (k) => String(k || "").trim();
+
+/** GET /api/highlights?paper=<key> -> { highlights: [...] } */
 async function getHighlights(req, res) {
-  const name = safeName(new URL(req.url, "http://localhost").searchParams.get("paper") || "");
+  const key = hlKey(new URL(req.url, "http://localhost").searchParams.get("paper"));
   const all = await readHighlights();
-  json(res, 200, { highlights: all[name] || [] });
+  json(res, 200, { highlights: all[key] || [] });
 }
 
 /** POST /api/highlights { paper, highlights } -> { ok } */
 async function putHighlights(req, res) {
   const { paper, highlights } = await readJsonBody(req);
-  const name = safeName(paper || "");
-  if (!name) return json(res, 400, { ok: false });
+  const key = hlKey(paper);
+  if (!key) return json(res, 400, { ok: false });
   await mkdir(PAPERS_DIR, { recursive: true });
   const all = await readHighlights();
-  if (Array.isArray(highlights) && highlights.length) all[name] = highlights;
-  else delete all[name];
+  if (Array.isArray(highlights) && highlights.length) all[key] = highlights;
+  else delete all[key];
   await writeFile(HIGHLIGHTS_FILE, JSON.stringify(all, null, 2));
   json(res, 200, { ok: true });
 }
@@ -309,11 +447,13 @@ async function claude(req, res) {
  */
 async function synctex(req, res) {
   const q = new URL(req.url, "http://localhost").searchParams;
+  const sp = safeTexPath(q.get("name"));
+  if (!sp) return json(res, 400, { line: null });
   const page = parseInt(q.get("page") || "1", 10);
   const x = parseFloat(q.get("x") || "0");
   const y = parseFloat(q.get("y") || "0");
-  const r = await run("synctex", ["edit", "-o", `${page}:${x}:${y}:main.pdf`], {
-    cwd: PROJECT_DIR,
+  const r = await run("synctex", ["edit", "-o", `${page}:${x}:${y}:${sp.pdfBase}`], {
+    cwd: sp.dir,
     timeoutMs: 10_000,
   });
   // Output includes a line like "Line:28" for the first (closest) hit.
@@ -375,6 +515,7 @@ async function serveIndex(res) {
 // --- router ---------------------------------------------------------------
 
 const routes = {
+  "GET /api/texfiles": listTexFiles,
   "GET /api/file": getFile,
   "POST /api/file": putFile,
   "POST /api/compile": compile,
@@ -382,6 +523,7 @@ const routes = {
   "GET /api/papers": listPapers,
   "GET /api/paper": getPaper,
   "POST /api/paper": uploadPaper,
+  "POST /api/rename-papers": renamePapers,
   "GET /api/synctex": synctex,
   "GET /api/highlights": getHighlights,
   "POST /api/highlights": putHighlights,

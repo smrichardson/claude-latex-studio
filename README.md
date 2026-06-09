@@ -44,10 +44,35 @@ Drag the generated `.app` to your Dock. Clicking it starts the server (if needed
 and opens a chromeless app window. (The app is an AppleScript launcher around
 `scripts/launch.sh`; it's git-ignored because it bakes in this checkout's path.)
 
+## Projects & folder structure
+
+A project is a folder:
+
+```
+my-project/
+  main.tex          your writeup
+  references.bib    bibliography
+  papers/           source PDFs (subfolders allowed, e.g. papers/readings/, papers/finds/)
+  figures/          images for \includegraphics
+```
+
+The default is the repo's `project/`. Point at another with env vars:
+
+```bash
+STUDIO_PROJECT="/path/to/my-project" npm start      # open http://localhost:4319
+STUDIO_MAIN="writeup.tex" STUDIO_PROJECT=... npm start   # if the main file isn't main.tex
+```
+
+Scaffold a fresh one with `scripts/new-project.sh <path>`. Papers are discovered
+**recursively** under `papers/`, so you can organise them into subfolders.
+
 ## Paper reading + writeup workflow
 
-1. **Add papers.** Drop PDFs into `project/papers/` (or click ＋ in the PAPER pane to
-   upload). Hit ↻ to re-scan, then pick one from the dropdown to read it in the pane.
+1. **Add papers.** Drop PDFs into `project/papers/` (subfolders fine), or click ＋ in the
+   PAPER pane to upload. Hit ↻ to re-scan, then pick one from the dropdown to read it.
+   - **🧹 Tidy names:** click the broom in the PAPER header to rename arXiv-numbered /
+     cryptic PDFs (e.g. `2212.11254v1.pdf`) to readable *“Author Year - Title.pdf”* —
+     Claude reads each one. Highlights follow the rename.
 2. **Read with Claude.** With a paper selected, ask in the chat — e.g.
    *“Summarize this paper's method”* or *“What's the main contribution?”*. Claude opens
    the PDF (Read tool) and answers. The composer shows which paper is in context.
@@ -77,8 +102,13 @@ and opens a chromeless app window. (The app is an AppleScript launcher around
 
 ## Use
 
-- Source autosaves (~0.7 s) and recompiles. **Compile** forces a rebuild; LaTeX errors
-  surface in the Claude pane.
+- Source autosaves (~0.7 s) and recompiles. **Save** (or `⌘/Ctrl+S`) saves + compiles now;
+  **Compile** forces a rebuild. LaTeX errors surface in the Claude pane.
+- **Pick the file to edit** from the dropdown in the EDITOR header — any `.tex` in the
+  project (subfolders included). Edits/compile target the selected file; your choice is
+  remembered.
+- **Highlight the compiled PDF too:** click **✏︎** in the COMPILED header and drag to mark
+  spots to revise (separate from SyncTeX click-to-source, which works when ✏︎ is off).
 - **Rich Text: ON/OFF** toggles inline rendering of math, headings, bold/italic, bullets.
   Click a line to reveal its raw LaTeX for editing.
 - Drag the column dividers to resize panes. `⌘/Ctrl+Enter` sends a chat message.
