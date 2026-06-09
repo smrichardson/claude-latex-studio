@@ -529,6 +529,42 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+// project switcher
+async function refreshProjectLabel(): Promise<string> {
+  try {
+    const { dir } = await fetch("/api/project").then((x) => x.json());
+    $("project-name").textContent = dir.split("/").filter(Boolean).pop() || "project";
+    return dir;
+  } catch {
+    return "";
+  }
+}
+$("project-btn").addEventListener("click", async () => {
+  const cur = await refreshProjectLabel();
+  const dir = prompt("Open project folder (absolute path):", cur);
+  if (!dir || dir.trim() === cur) return;
+  setStatus("switching project…");
+  try {
+    const r = await fetch("/api/project", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: dir.trim() }),
+    }).then((x) => x.json());
+    if (!r.ok) {
+      setStatus(`project: ${r.error || "failed"}`, "err");
+      return;
+    }
+    paperSelect.value = "";
+    showPaper(""); // clear the paper pane (project-specific)
+    await loadPapers();
+    await loadTexFiles();
+    await refreshProjectLabel();
+    setStatus("project switched ✓", "ok");
+  } catch {
+    setStatus("project switch failed", "err");
+  }
+});
+
 // theme switcher
 function applyTheme(name: string) {
   if (!THEMES[name]) name = "manuscript";
@@ -854,6 +890,7 @@ function initResizers() {
   restoreTranscript();
   updateCtx();
   setStatus("loading…");
+  await refreshProjectLabel();
   await loadPapers();
   await loadTexFiles(); // sets the active .tex, loads it, and compiles
 })();

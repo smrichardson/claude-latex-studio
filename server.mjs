@@ -17,17 +17,27 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, basename, extname, normalize, resolve, relative } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// The project folder is configurable, so you can keep several writeups (or point
-// at an existing project). STUDIO_PROJECT = path to the folder; STUDIO_MAIN = the
-// main .tex filename within it (default main.tex).
-const PROJECT_DIR = resolve(process.env.STUDIO_PROJECT || join(__dirname, "project"));
 const DIST_DIR = join(__dirname, "dist"); // built frontend (vite build) for production
-const PAPERS_DIR = join(PROJECT_DIR, "papers");
+const PORT = 4319;
+
+// The project folder is switchable at runtime (POST /api/project). All of these
+// paths are reassigned together by setProjectDir, and every handler reads the
+// live bindings — so a switch takes effect immediately. STUDIO_PROJECT sets the
+// initial folder; STUDIO_MAIN sets the default main .tex filename.
+let PROJECT_DIR, PAPERS_DIR, FIGURES_DIR, CAPTURES_DIR, HIGHLIGHTS_FILE, MAIN_TEX, MAIN_PDF;
 const MAIN_NAME = process.env.STUDIO_MAIN || "main.tex";
 const MAIN_PDF_NAME = MAIN_NAME.replace(/\.tex$/i, ".pdf");
-const MAIN_TEX = join(PROJECT_DIR, MAIN_NAME);
-const MAIN_PDF = join(PROJECT_DIR, MAIN_PDF_NAME);
-const PORT = 4319;
+
+function setProjectDir(dir) {
+  PROJECT_DIR = resolve(dir);
+  PAPERS_DIR = join(PROJECT_DIR, "papers");
+  FIGURES_DIR = join(PROJECT_DIR, "figures");
+  CAPTURES_DIR = join(PROJECT_DIR, ".captures");
+  HIGHLIGHTS_FILE = join(PAPERS_DIR, ".highlights.json");
+  MAIN_TEX = join(PROJECT_DIR, MAIN_NAME);
+  MAIN_PDF = join(PROJECT_DIR, MAIN_PDF_NAME);
+}
+setProjectDir(process.env.STUDIO_PROJECT || join(__dirname, "project"));
 
 // Call binaries directly with an explicit PATH so we never trigger the user's
 // login-shell banner and so `claude`/`latexmk`/`node` all resolve.
@@ -312,8 +322,6 @@ async function renamePapers(req, res) {
   json(res, 200, { renamed, considered: targets.length });
 }
 
-const FIGURES_DIR = join(PROJECT_DIR, "figures");
-
 /** POST /api/figure?name=plot.png  (raw image body) -> { ok, name }.
  * Saves an image into figures/ so \includegraphics{figures/<name>} resolves. */
 async function uploadFigure(req, res) {
@@ -323,8 +331,6 @@ async function uploadFigure(req, res) {
   json(res, 200, { ok: true, name });
 }
 
-const CAPTURES_DIR = join(PROJECT_DIR, ".captures");
-
 /** POST /api/capture?name=cap.png  (raw PNG body) -> { ok, name }.
  * A cropped region of a paper, saved so Claude can Read it (vision). */
 async function uploadCapture(req, res) {
@@ -333,8 +339,6 @@ async function uploadCapture(req, res) {
   await writeFile(join(CAPTURES_DIR, name), await readRawBody(req));
   json(res, 200, { ok: true, name });
 }
-
-const HIGHLIGHTS_FILE = join(PAPERS_DIR, ".highlights.json");
 
 async function readHighlights() {
   try {
@@ -465,6 +469,27 @@ async function synctex(req, res) {
   });
 }
 
+/** GET /api/project -> { dir } */
+async function getProject(_req, res) {
+  json(res, 200, { dir: PROJECT_DIR });
+}
+
+/** POST /api/project { dir } -> { ok, dir }. Switches the project folder and
+ * persists it to ~/.latex-claude-studio.env so it sticks (and the dock app uses it). */
+async function setProject(req, res) {
+  const { dir } = await readJsonBody(req);
+  if (!dir) return json(res, 400, { ok: false, error: "no folder given" });
+  const target = resolve(dir.replace(/^~(?=$|\/)/, process.env.HOME || "~"));
+  try {
+    if (!(await stat(target)).isDirectory()) throw new Error("not a directory");
+  } catch {
+    return json(res, 400, { ok: false, error: "folder not found" });
+  }
+  setProjectDir(target);
+  await writeFile(join(process.env.HOME, ".latex-claude-studio.env"), `STUDIO_PROJECT=${target}\n`).catch(() => {});
+  json(res, 200, { ok: true, dir: PROJECT_DIR });
+}
+
 // --- static frontend (production: serve the vite build from dist/) --------
 
 const MIME = {
@@ -515,6 +540,8 @@ async function serveIndex(res) {
 // --- router ---------------------------------------------------------------
 
 const routes = {
+  "GET /api/project": getProject,
+  "POST /api/project": setProject,
   "GET /api/texfiles": listTexFiles,
   "GET /api/file": getFile,
   "POST /api/file": putFile,

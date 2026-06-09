@@ -66,6 +66,9 @@ STUDIO_MAIN="writeup.tex" STUDIO_PROJECT=... npm start   # if the main file isn'
 Scaffold a fresh one with `scripts/new-project.sh <path>`. Papers are discovered
 **recursively** under `papers/`, so you can organise them into subfolders.
 
+Or just click **📁 project** in the toolbar to switch folders at runtime — the choice
+persists (to `~/.latex-claude-studio.env`, which the dock app also reads).
+
 ## Paper reading + writeup workflow
 
 1. **Add papers.** Drop PDFs into `project/papers/` (subfolders fine), or click ＋ in the
@@ -109,8 +112,10 @@ Scaffold a fresh one with `scripts/new-project.sh <path>`. Papers are discovered
   remembered.
 - **Highlight the compiled PDF too:** click **✏︎** in the COMPILED header and drag to mark
   spots to revise (separate from SyncTeX click-to-source, which works when ✏︎ is off).
-- **Rich Text: ON/OFF** toggles inline rendering of math, headings, bold/italic, bullets.
-  Click a line to reveal its raw LaTeX for editing.
+- **Rich Text: ON/OFF** toggles inline rendering of math, headings, bold/italic, bullets,
+  **display-math environments** (`equation`/`align`/`gather`/`multline`), and **theorem-like
+  environments** (`remark`/`assumption`/… shown as a bold label). Click a line (or anywhere
+  in a multi-line block) to reveal its raw LaTeX for editing.
 - Drag the column dividers to resize panes. `⌘/Ctrl+Enter` sends a chat message.
 - **Theme** picker (top-right): _Manuscript_ (warm paper), _Slate_ (neutral dark), or
   _B&W_ (crisp light). Your choice is remembered; `?theme=slate` also forces one.
