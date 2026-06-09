@@ -39,6 +39,47 @@ const saveListener = EditorView.updateListener.of((u) => {
   if (u.docChanged && !applyingRemote) scheduleSave();
 });
 
+// --- themes ---------------------------------------------------------------
+const THEMES: Record<string, { dark: boolean }> = {
+  manuscript: { dark: false },
+  slate: { dark: true },
+  bw: { dark: false },
+};
+const storedTheme = localStorage.getItem("theme");
+const initialTheme = storedTheme && THEMES[storedTheme] ? storedTheme : "manuscript";
+document.body.dataset.theme = initialTheme; // set before first paint to avoid a flash
+
+const editorTheme = new Compartment();
+// Light themes: transparent editor so the pane's paper colour shows; vars drive it.
+const lightEditorTheme = EditorView.theme(
+  {
+    "&": { backgroundColor: "transparent", color: "var(--fg)" },
+    ".cm-content": { caretColor: "var(--fg)" },
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--fg)" },
+    ".cm-gutters": { backgroundColor: "transparent", color: "var(--muted)", borderRight: "1px solid var(--border)" },
+    ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--accent) 7%, transparent)" },
+    ".cm-activeLineGutter": { backgroundColor: "color-mix(in srgb, var(--accent) 10%, transparent)" },
+    ".cm-foldPlaceholder": {
+      backgroundColor: "var(--panel)",
+      color: "var(--muted)",
+      border: "1px solid var(--border)",
+      borderRadius: "4px",
+      padding: "0 6px",
+    },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+      backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)",
+    },
+  },
+  { dark: false },
+);
+// Dark theme: keep oneDark's syntax colours but let the pane background show through.
+const darkEditorBg = EditorView.theme({
+  "&": { backgroundColor: "transparent" },
+  ".cm-gutters": { backgroundColor: "transparent" },
+});
+const editorThemeExt = (name: string) =>
+  THEMES[name]?.dark ? [oneDark, darkEditorBg] : lightEditorTheme;
+
 const view = new EditorView({
   state: EditorState.create({
     doc: "",
@@ -46,7 +87,7 @@ const view = new EditorView({
       basicSetup,
       codeFolding({ placeholderText: "⋯  preamble (packages & macros) — click to show  ⋯" }),
       latex({ enableLinting: false }),
-      oneDark,
+      editorTheme.of(editorThemeExt(initialTheme)),
       EditorView.lineWrapping,
       richText.of(richTextPreview()),
       saveListener,
@@ -409,6 +450,18 @@ $("toggle-rt").addEventListener("click", () => {
   btn.classList.toggle("on", richTextOn);
 });
 $("compile").addEventListener("click", saveAndCompile);
+
+// theme switcher
+function applyTheme(name: string) {
+  if (!THEMES[name]) name = "manuscript";
+  document.body.dataset.theme = name;
+  localStorage.setItem("theme", name);
+  view.dispatch({ effects: editorTheme.reconfigure(editorThemeExt(name)) });
+  ($("theme-select") as HTMLSelectElement).value = name;
+}
+$("theme-select").addEventListener("change", (e) => applyTheme((e.target as HTMLSelectElement).value));
+const urlTheme = new URLSearchParams(location.search).get("theme") || "";
+applyTheme(THEMES[urlTheme] ? urlTheme : initialTheme);
 
 // --- insert images into the writeup --------------------------------------
 function figureSnippet(name: string): string {

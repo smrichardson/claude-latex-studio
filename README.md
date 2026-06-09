@@ -82,6 +82,8 @@ and opens a chromeless app window. (The app is an AppleScript launcher around
 - **Rich Text: ON/OFF** toggles inline rendering of math, headings, bold/italic, bullets.
   Click a line to reveal its raw LaTeX for editing.
 - Drag the column dividers to resize panes. `⌘/Ctrl+Enter` sends a chat message.
+- **Theme** picker (top-right): _Manuscript_ (warm paper), _Slate_ (neutral dark), or
+  _B&W_ (crisp light). Your choice is remembered; `?theme=slate` also forces one.
 
 ## Files
 
