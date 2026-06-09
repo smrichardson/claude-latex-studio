@@ -1,11 +1,69 @@
 \documentclass[11pt]{article}
-\usepackage{amsmath, amssymb}
+
+% ---- Layout & typography ----
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+
+% ---- Math ----
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{bm}                 % bold vectors/matrices
+
+% ---- Tables, figures, algorithms ----
+\usepackage{booktabs}
 \usepackage{graphicx}
 \graphicspath{{figures/}}
-\usepackage[margin=1in]{geometry}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% ---- Color, links, citations, smart refs ----
+\usepackage{xcolor}
 \usepackage[numbers, sort&compress]{natbib}
 \usepackage{hyperref}
 \hypersetup{colorlinks=true, citecolor=blue, linkcolor=black, urlcolor=blue}
+\usepackage{cleveref}           % \cref / \Cref (load AFTER hyperref)
+
+% ---- Theorem-like environments ----
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{remark}{Remark}
+
+% ---- Common stats / ML macros ----
+\newcommand{\R}{\mathbb{R}}                       % real numbers
+\newcommand{\N}{\mathbb{N}}                        % naturals
+\newcommand{\E}{\mathbb{E}}                        % expectation
+\newcommand{\Prob}{\mathbb{P}}                     % probability
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\Corr}{\operatorname{Corr}}
+\newcommand{\Bias}{\operatorname{Bias}}
+\newcommand{\MSE}{\operatorname{MSE}}
+\newcommand{\KL}{\operatorname{KL}}
+\newcommand{\Tr}{\operatorname{Tr}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\sign}{\operatorname{sign}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\indep}{\perp\!\!\!\perp}              % statistical independence
+\newcommand{\given}{\,\vert\,}
+\newcommand{\ind}{\mathbf{1}}                      % indicator
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\abs}[1]{\left\lvert#1\right\rvert}
+\newcommand{\inner}[2]{\left\langle #1, #2 \right\rangle}
+\newcommand{\set}[1]{\left\{#1\right\}}
+\newcommand{\iid}{\overset{\text{iid}}{\sim}}
+\newcommand{\Normal}{\mathcal{N}}                  % Gaussian
+\newcommand{\loss}{\mathcal{L}}
+\newcommand{\data}{\mathcal{D}}
+\newcommand{\trans}{^{\top}}                       % transpose
+\newcommand{\est}[1]{\hat{#1}}                     % estimator
 
 \title{Literature Review: \emph{your topic here}}
 \author{Your Name}
@@ -18,8 +76,6 @@
 One paragraph synthesizing what these papers collectively say and the gap you
 see across them. Write this last, once the sections below are filled in.
 \end{abstract}
-
-  Now $45052rwarawe $  
 
 \section{Motivation}
 Why this body of work matters and the question that ties these papers together.

@@ -62,6 +62,10 @@ and opens a chromeless app window. (The app is an AppleScript launcher around
    - **Insert images:** click **🖼** in the EDITOR header (or drag an image file onto the
      editor). It's saved to `project/figures/` and a `\includegraphics` figure block is
      inserted at the cursor — no manual file wrangling.
+   - The template preamble ships with common **stats/ML packages and macros**
+     (`mathtools`, `bm`, `booktabs`, `algorithm`, `cleveref`, theorem envs, and macros like
+     `\E \Var \argmin \norm \indep \Normal`). **Hide preamble** in the EDITOR header folds
+     it away so you can focus on the body.
 4. **Let Claude write.** Tick **Edit mode** and ask e.g.
    *“Add this paper to the Themes section with a citation, and add its BibTeX entry.”*
    Claude edits `main.tex` **and** `references.bib`; the editor reloads and recompiles.

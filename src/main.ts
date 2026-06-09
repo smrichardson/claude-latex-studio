@@ -1,5 +1,6 @@
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState, Compartment } from "@codemirror/state";
+import { codeFolding, foldEffect, unfoldEffect, foldedRanges } from "@codemirror/language";
 import { latex } from "codemirror-lang-latex";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { richTextPreview } from "./rich-text-preview";
@@ -43,6 +44,7 @@ const view = new EditorView({
     doc: "",
     extensions: [
       basicSetup,
+      codeFolding({ placeholderText: "⋯  preamble (packages & macros) — click to show  ⋯" }),
       latex({ enableLinting: false }),
       oneDark,
       EditorView.lineWrapping,
@@ -460,6 +462,33 @@ editorEl.addEventListener("drop", (e) => {
   e.stopPropagation();
   for (const f of files) uploadAndInsertImage(f);
 });
+
+// --- hide/show the preamble (fold everything before \begin{document}) ----
+function preambleFold(): { from: number; to: number } | null {
+  let r: { from: number; to: number } | null = null;
+  foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
+    if (from === 0 && !r) r = { from, to };
+  });
+  return r;
+}
+
+function togglePreamble() {
+  const existing = preambleFold();
+  if (existing) {
+    view.dispatch({ effects: unfoldEffect.of(existing) });
+  } else {
+    const idx = view.state.doc.toString().indexOf("\\begin{document}");
+    if (idx <= 0) return;
+    const to = view.state.doc.lineAt(idx).from - 1; // up to the newline before \begin{document}
+    if (to <= 0) return;
+    view.dispatch({ effects: foldEffect.of({ from: 0, to }) });
+  }
+  const folded = !!preambleFold();
+  const btn = $("preamble-toggle");
+  btn.textContent = folded ? "Show preamble" : "Hide preamble";
+  btn.classList.toggle("on", folded);
+}
+$("preamble-toggle").addEventListener("click", togglePreamble);
 
 // --- papers ---------------------------------------------------------------
 function selectedPaper(): string {
