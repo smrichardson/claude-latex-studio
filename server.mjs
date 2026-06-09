@@ -501,6 +501,7 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
   ".woff2": "font/woff2",
   ".map": "application/json",
 };
