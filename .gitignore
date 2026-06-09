@@ -20,6 +20,7 @@ project/*.bak
 
 # runtime / user content
 project/.captures/
+project/figures/
 project/papers/.highlights.json
 
 # Don't publish real papers (copyright) — keep only the bundled sample.

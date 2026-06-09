@@ -59,9 +59,14 @@ and opens a chromeless app window. (The app is an AppleScript launcher around
      reopens automatically.
 3. **Write it up.** Edit `main.tex` (the lit-review template) on the left; it autosaves
    and recompiles. Toggle **Rich Text** to see math/headings rendered inline.
-4. **Let Claude write.** Tick *“Let Claude edit files”* and ask e.g.
+   - **Insert images:** click **🖼** in the EDITOR header (or drag an image file onto the
+     editor). It's saved to `project/figures/` and a `\includegraphics` figure block is
+     inserted at the cursor — no manual file wrangling.
+4. **Let Claude write.** Tick **Edit mode** and ask e.g.
    *“Add this paper to the Themes section with a citation, and add its BibTeX entry.”*
    Claude edits `main.tex` **and** `references.bib`; the editor reloads and recompiles.
+   The chat **remembers the conversation** (so "now expand on that" works); hit **New**
+   in the CLAUDE header to start fresh.
 
 ## Use
 

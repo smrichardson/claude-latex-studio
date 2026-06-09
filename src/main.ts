@@ -408,6 +408,59 @@ $("toggle-rt").addEventListener("click", () => {
 });
 $("compile").addEventListener("click", saveAndCompile);
 
+// --- insert images into the writeup --------------------------------------
+function figureSnippet(name: string): string {
+  const label = name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .toLowerCase()
+    .replace(/^-|-$/g, "");
+  return `\n\\begin{figure}[h]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{figures/${name}}\n  \\caption{}\n  \\label{fig:${label}}\n\\end{figure}\n`;
+}
+
+function insertAtCursor(text: string) {
+  const pos = view.state.selection.main.head;
+  view.dispatch({
+    changes: { from: pos, insert: text },
+    selection: { anchor: pos + text.length },
+  });
+  view.focus(); // the doc change triggers autosave + recompile
+}
+
+async function uploadAndInsertImage(file: File) {
+  if (!file.type.startsWith("image/")) return;
+  // LaTeX-safe filename: no spaces/odd chars (\includegraphics dislikes them).
+  const safe = file.name.replace(/[^\w.\-]+/g, "_");
+  setStatus(`uploading ${safe}…`);
+  const r = await fetch(`/api/figure?name=${encodeURIComponent(safe)}`, {
+    method: "POST",
+    headers: { "content-type": file.type || "application/octet-stream" },
+    body: await file.arrayBuffer(),
+  }).then((x) => x.json());
+  insertAtCursor(figureSnippet(r.name || safe));
+  setStatus("image inserted ✓", "ok");
+}
+
+$("img-insert").addEventListener("click", () => $<HTMLInputElement>("img-file").click());
+$<HTMLInputElement>("img-file").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.files?.[0]) uploadAndInsertImage(input.files[0]);
+  input.value = "";
+});
+
+// Drag an image file straight onto the editor to insert it at the cursor.
+const editorEl = $("editor");
+editorEl.addEventListener("dragover", (e) => {
+  if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+});
+editorEl.addEventListener("drop", (e) => {
+  const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/"));
+  if (!files.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  for (const f of files) uploadAndInsertImage(f);
+});
+
 // --- papers ---------------------------------------------------------------
 function selectedPaper(): string {
   return paperSelect.value;
@@ -485,10 +538,11 @@ function addMsg(kind: "user" | "bot" | "sys", text: string): HTMLDivElement {
   return div;
 }
 
-// Persist user/bot turns so the transcript survives a refresh. (Each Claude call
-// is still independent — see README: multi-turn continuity is a separate step.)
+// Persist user/bot turns so the transcript survives a refresh. (The conversation
+// itself continues via claudeSession / --resume; "New" resets both.)
 type Turn = { kind: "user" | "bot"; text: string };
 let transcript: Turn[] = [];
+let claudeSession: string | null = localStorage.getItem("claudeSession"); // resume id for multi-turn memory
 function pushTurn(kind: "user" | "bot", text: string) {
   transcript.push({ kind, text });
   transcript = transcript.slice(-100);
@@ -533,9 +587,13 @@ async function sendToClaude() {
     const r = await fetch("/api/claude", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, mode, paper, capture }),
+      body: JSON.stringify({ prompt, mode, paper, capture, session: claudeSession || undefined }),
     }).then((x) => x.json());
 
+    if (r.session) {
+      claudeSession = r.session;
+      localStorage.setItem("claudeSession", r.session); // remember the conversation
+    }
     pending.remove();
     addMsg("bot", r.output || "(no output)");
     pushTurn("bot", r.output || "(no output)");
@@ -559,6 +617,14 @@ promptEl.addEventListener("keydown", (e) => {
     e.preventDefault();
     sendToClaude();
   }
+});
+$("new-chat").addEventListener("click", () => {
+  claudeSession = null;
+  transcript = [];
+  localStorage.removeItem("claudeSession");
+  localStorage.removeItem("chat");
+  logEl.innerHTML = "";
+  addMsg("sys", "New conversation. Claude won't remember the previous chat.");
 });
 
 // --- resizable columns ----------------------------------------------------

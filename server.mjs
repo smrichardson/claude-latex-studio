@@ -178,6 +178,17 @@ async function uploadPaper(req, res) {
   json(res, 200, { ok: true, name });
 }
 
+const FIGURES_DIR = join(PROJECT_DIR, "figures");
+
+/** POST /api/figure?name=plot.png  (raw image body) -> { ok, name }.
+ * Saves an image into figures/ so \includegraphics{figures/<name>} resolves. */
+async function uploadFigure(req, res) {
+  const name = safeName(new URL(req.url, "http://localhost").searchParams.get("name") || "figure.png");
+  await mkdir(FIGURES_DIR, { recursive: true });
+  await writeFile(join(FIGURES_DIR, name), await readRawBody(req));
+  json(res, 200, { ok: true, name });
+}
+
 const CAPTURES_DIR = join(PROJECT_DIR, ".captures");
 
 /** POST /api/capture?name=cap.png  (raw PNG body) -> { ok, name }.
@@ -228,32 +239,48 @@ async function putHighlights(req, res) {
  * In both modes Claude gets read-only tools (Read/Glob/Grep) so it can open the
  * source PDFs in papers/ — the Read tool understands PDF content.
  */
+/** Pull { text, session } out of `claude --output-format json` (an event array). */
+function parseClaudeJson(stdout) {
+  try {
+    const events = JSON.parse(stdout);
+    const arr = Array.isArray(events) ? events : [events];
+    const result = arr.find((e) => e.type === "result") || {};
+    return { text: result.result || result.error || "", session: result.session_id || null };
+  } catch {
+    return { text: stdout, session: null };
+  }
+}
+
 async function claude(req, res) {
-  const { prompt, mode = "ask", paper, capture } = await readJsonBody(req);
+  const { prompt, mode = "ask", paper, capture, session } = await readJsonBody(req);
   if (!prompt || !prompt.trim()) return json(res, 400, { ok: false, output: "Empty prompt." });
 
   const paperName = paper ? safeName(paper) : null;
-  const paperLine = paperName
-    ? `The user is asking about the paper at papers/${paperName} — read it with the Read tool first.\n`
-    : "";
   const captureName = capture ? safeName(capture) : null;
-  const captureLine = captureName
-    ? `The user highlighted a region of the paper; the cropped image is at .captures/${captureName} — Read that image to see exactly what they marked.\n`
-    : "";
 
-  const sys =
-    "You are assisting with a LaTeX literature review. The working directory " +
-    "contains main.tex (the writeup), references.bib (BibTeX), and a papers/ " +
-    "folder of source PDFs you can open with the Read tool. " +
-    paperLine +
-    captureLine +
-    (mode === "edit"
-      ? "Make the requested change by editing main.tex and/or references.bib directly, " +
-        "then briefly summarize what you changed. When you add a citation, also add a " +
-        "matching BibTeX entry to references.bib."
-      : "Answer concisely. Do not modify any files.");
+  // Per-message context lives in the user prompt (not the system prompt), so it
+  // stays correct turn-to-turn even when resuming a session.
+  let ctx = "";
+  if (paperName) ctx += `[Read papers/${paperName} (a source PDF) for this question.]\n`;
+  if (captureName)
+    ctx += `[The user highlighted a region — Read the image .captures/${captureName} to see exactly what they marked.]\n`;
+  if (mode === "edit")
+    ctx += "[Make the change by editing main.tex and/or references.bib directly, then summarize. Add a BibTeX entry for any new citation.]\n";
+  const userPrompt = ctx + prompt;
 
-  const args = ["-p", prompt, "--output-format", "text", "--append-system-prompt", sys];
+  const args = ["-p", userPrompt, "--output-format", "json"];
+
+  if (session) {
+    // Continue the existing conversation — it already has the system context.
+    args.push("--resume", session);
+  } else {
+    args.push(
+      "--append-system-prompt",
+      "You are assisting with a LaTeX literature review in the current directory: " +
+        "main.tex (the writeup), references.bib (BibTeX), and papers/ (source PDFs). " +
+        "Read files for their current state. Keep answers concise.",
+    );
+  }
   if (mode === "edit") {
     args.push("--permission-mode", "acceptEdits", "--allowed-tools", "Edit", "Write", "Read", "Glob", "Grep");
   } else {
@@ -264,10 +291,12 @@ async function claude(req, res) {
     cwd: PROJECT_DIR,
     timeoutMs: mode === "edit" ? 300_000 : 180_000,
   });
+  const parsed = parseClaudeJson(r.stdout);
   const content = mode === "edit" ? await readFile(MAIN_TEX, "utf8").catch(() => null) : null;
   json(res, 200, {
     ok: r.code === 0,
-    output: r.stdout.trim() || r.stderr.trim() || "(no output)",
+    output: parsed.text.trim() || r.stderr.trim() || "(no output)",
+    session: parsed.session,
     edited: mode === "edit",
     content,
   });
@@ -357,6 +386,7 @@ const routes = {
   "GET /api/highlights": getHighlights,
   "POST /api/highlights": putHighlights,
   "POST /api/capture": uploadCapture,
+  "POST /api/figure": uploadFigure,
   "POST /api/claude": claude,
 };
 

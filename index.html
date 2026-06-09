@@ -96,7 +96,12 @@
 
         <!-- EDITOR -->
         <div class="pane" data-grow="1.3">
-          <div class="head">EDITOR <span id="save-state" style="margin-left:auto; text-transform:none; font-weight:400"></span></div>
+          <div class="head">EDITOR
+            <span style="flex:1"></span>
+            <span id="save-state" style="text-transform:none; font-weight:400; margin-right:6px"></span>
+            <button id="img-insert" class="sm" title="Insert image (or drag one onto the editor)">🖼</button>
+            <input id="img-file" type="file" accept="image/*" style="display:none" />
+          </div>
           <div class="body"><div id="editor"></div></div>
         </div>
         <div class="resizer"></div>
@@ -114,7 +119,10 @@
 
         <!-- CLAUDE -->
         <div class="pane" data-grow="0.95">
-          <div class="head">CLAUDE</div>
+          <div class="head">CLAUDE
+            <span style="flex:1"></span>
+            <button id="new-chat" class="sm" title="Start a fresh conversation">New</button>
+          </div>
           <div class="body">
             <div id="chat">
               <div id="log">
