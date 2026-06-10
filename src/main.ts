@@ -945,7 +945,14 @@ async function sendToClaude() {
     const r = await fetch("/api/claude", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, mode, paper, capture, session: claudeSession || undefined }),
+      body: JSON.stringify({
+        prompt,
+        mode,
+        paper,
+        capture,
+        session: claudeSession || undefined,
+        model: modelSelect.value || undefined,
+      }),
     }).then((x) => x.json());
 
     if (r.session) {
@@ -968,6 +975,14 @@ async function sendToClaude() {
     addMsg("sys", `Request failed: ${e}`);
   }
 }
+
+// per-message model override (persisted); "" = your Claude Code default
+const modelSelect = $<HTMLSelectElement>("model-select");
+{
+  const saved = localStorage.getItem("chatModel") || "";
+  if (Array.from(modelSelect.options).some((o) => o.value === saved)) modelSelect.value = saved;
+}
+modelSelect.addEventListener("change", () => localStorage.setItem("chatModel", modelSelect.value));
 
 $("send").addEventListener("click", sendToClaude);
 promptEl.addEventListener("keydown", (e) => {

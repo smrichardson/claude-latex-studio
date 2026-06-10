@@ -148,7 +148,9 @@ a manual snapshot anytime.
   in a multi-line block) to reveal its raw LaTeX for editing.
 - Drag the column dividers to resize panes, or **hide whole panes** with the
   Paper / Editor / PDF / Chat toggles in the toolbar (persisted).
-- **Enter** sends a chat message (Shift+Enter for a newline).
+- **Enter** sends a chat message (Shift+Enter for a newline). The **model
+  dropdown** in the composer picks the Claude model per message (Default =
+  whatever your Claude Code CLI is set to; switch with `/model` there).
 - **Rewind:** hover a chat message you sent and click **⏪** — the conversation,
   Claude's memory, *and the document* roll back to just before that message
   (every turn is checkpointed via `claude --fork-session` + a `.tex` snapshot),

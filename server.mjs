@@ -387,14 +387,19 @@ function parseClaudeJson(stdout) {
     const events = JSON.parse(stdout);
     const arr = Array.isArray(events) ? events : [events];
     const result = arr.find((e) => e.type === "result") || {};
-    return { text: result.result || result.error || "", session: result.session_id || null };
+    const init = arr.find((e) => e.type === "system" && e.subtype === "init") || {};
+    return {
+      text: result.result || result.error || "",
+      session: result.session_id || null,
+      model: init.model || null,
+    };
   } catch {
-    return { text: stdout, session: null };
+    return { text: stdout, session: null, model: null };
   }
 }
 
 async function claude(req, res) {
-  const { prompt, mode = "ask", paper, capture, session } = await readJsonBody(req);
+  const { prompt, mode = "ask", paper, capture, session, model } = await readJsonBody(req);
   if (!prompt || !prompt.trim()) return json(res, 400, { ok: false, output: "Empty prompt." });
 
   const paperName = paper ? safeName(paper) : null;
@@ -429,6 +434,8 @@ async function claude(req, res) {
   } else {
     args.push("--allowed-tools", "Read", "Glob", "Grep");
   }
+  // Optional per-message model override; without it the CLI's default applies.
+  if (model) args.push("--model", String(model));
 
   const r = await run("claude", args, {
     cwd: PROJECT_DIR,
@@ -443,6 +450,7 @@ async function claude(req, res) {
     ok: r.code === 0,
     output: parsed.text.trim() || r.stderr.trim() || "(no output)",
     session: parsed.session,
+    model: parsed.model,
     edited: mode === "edit",
     content,
   });
