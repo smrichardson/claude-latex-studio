@@ -72,6 +72,12 @@ Scaffold a fresh one with `scripts/new-project.sh <path>`. Papers are discovered
 Or just click **📁 project** in the toolbar to switch folders at runtime — the choice
 persists (to `~/.latex-claude-studio.env`, which the dock app also reads).
 
+**Git checkpoints (optional):** if the project folder is a git repo, the studio
+auto-commits after every Claude edit (message: `claude: <your prompt>`) and pushes
+in the background; the **📸** toolbar button commits a manual snapshot. Set it up
+once with `git init` + a GitHub remote (private for unpublished work) and your
+writing history takes care of itself.
+
 ## Paper reading + writeup workflow
 
 1. **Add papers.** Drop PDFs into `project/papers/` (subfolders fine), or click ＋ in the

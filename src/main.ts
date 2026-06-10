@@ -521,6 +521,19 @@ $("save-btn").addEventListener("click", () => {
   clearTimeout(saveTimer);
   saveAndCompile();
 });
+$("checkpoint-btn").addEventListener("click", async () => {
+  clearTimeout(saveTimer);
+  await saveFile();
+  setStatus("checkpointing…");
+  const r = await fetch("/api/checkpoint", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "manual checkpoint from studio" }),
+  })
+    .then((x) => x.json())
+    .catch(() => ({ committed: false }));
+  setStatus(r.committed ? "checkpoint committed ✓" : "no changes (or not a git repo)", r.committed ? "ok" : "");
+});
 window.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault(); // Cmd/Ctrl+S = save now

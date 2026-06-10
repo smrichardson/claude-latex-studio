@@ -436,6 +436,9 @@ async function claude(req, res) {
   });
   const parsed = parseClaudeJson(r.stdout);
   const content = mode === "edit" ? await readFile(MAIN_TEX, "utf8").catch(() => null) : null;
+  if (mode === "edit" && r.code === 0) {
+    gitCheckpoint(`claude: ${prompt.replace(/\s+/g, " ").slice(0, 72)}`).catch(() => {});
+  }
   json(res, 200, {
     ok: r.code === 0,
     output: parsed.text.trim() || r.stderr.trim() || "(no output)",
@@ -468,6 +471,36 @@ async function synctex(req, res) {
     line: m ? parseInt(m[1], 10) : null,
     file: fileM ? fileM[1].trim() : null,
   });
+}
+
+/**
+ * Commit the project (and push in the background) when it's a git repo.
+ * Called after Claude edits and from the 📸 button; a no-op without .git.
+ */
+async function gitCheckpoint(message) {
+  try {
+    if (!(await stat(join(PROJECT_DIR, ".git"))).isDirectory()) return { committed: false };
+  } catch {
+    return { committed: false }; // not a git repo — checkpointing is opt-in
+  }
+  await run("git", ["add", "-A"], { cwd: PROJECT_DIR, timeoutMs: 15_000 });
+  const c = await run("git", ["commit", "-m", message.slice(0, 200)], {
+    cwd: PROJECT_DIR,
+    timeoutMs: 15_000,
+  });
+  const committed = c.code === 0; // non-zero usually means "nothing to commit"
+  if (committed) {
+    // Push without blocking the response; failures (offline, no remote) are fine.
+    run("git", ["push"], { cwd: PROJECT_DIR, timeoutMs: 60_000 }).catch(() => {});
+  }
+  return { committed };
+}
+
+/** POST /api/checkpoint { message } -> { ok, committed } */
+async function checkpoint(req, res) {
+  const { message } = await readJsonBody(req).catch(() => ({}));
+  const r = await gitCheckpoint(message || "checkpoint");
+  json(res, 200, { ok: true, ...r });
 }
 
 /** GET /api/project -> { dir } */
@@ -544,6 +577,7 @@ async function serveIndex(res) {
 const routes = {
   "GET /api/project": getProject,
   "POST /api/project": setProject,
+  "POST /api/checkpoint": checkpoint,
   "GET /api/texfiles": listTexFiles,
   "GET /api/file": getFile,
   "POST /api/file": putFile,
