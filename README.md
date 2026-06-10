@@ -12,6 +12,25 @@ It deliberately reuses tools already on your Mac rather than bundling its own:
   `papers/` (the Read tool understands PDFs) and **edit** `main.tex` / `references.bib`
 - a browser renders both PDFs natively
 
+## What it looks like
+
+The four panes: a paper you're reading (with a highlight), the editor, your
+compiled writeup, and Claude (a real reply about the bundled sample paper):
+
+![The studio: paper · editor · compiled PDF · Claude chat](assets/hero.png)
+
+The editor live-renders your LaTeX as you type — inline math, `align`
+environments, theorem labels, citation chips, and **your own preamble macros**
+(`\E`, `\argmin`, `\norm`, …), with the preamble folded out of the way. Click
+any line to edit its raw source:
+
+![Live-rendered math, theorem environments, and citation chips in the editor](assets/richtext.png)
+
+Three classic themes — warm *Manuscript* (above), neutral-dark *Slate* (below),
+and crisp *B&W*:
+
+![The Slate theme](assets/slate.png)
+
 ## Requirements
 
 - **Node 18+**
