@@ -662,6 +662,22 @@ async function uploadAndInsertImage(file: File) {
   setStatus("image inserted ✓", "ok");
 }
 
+// editor font size (CodeMirror, KaTeX widgets, and headings all scale in em)
+let editorFont = parseInt(localStorage.getItem("editorFont") || "14", 10);
+function applyEditorFont() {
+  $("editor").style.fontSize = `${editorFont}px`;
+  localStorage.setItem("editorFont", String(editorFont));
+  view.requestMeasure();
+}
+$("ef-dec").addEventListener("click", () => {
+  editorFont = Math.max(10, editorFont - 1);
+  applyEditorFont();
+});
+$("ef-inc").addEventListener("click", () => {
+  editorFont = Math.min(24, editorFont + 1);
+  applyEditorFont();
+});
+
 $("img-insert").addEventListener("click", () => $<HTMLInputElement>("img-file").click());
 $<HTMLInputElement>("img-file").addEventListener("change", (e) => {
   const input = e.target as HTMLInputElement;
@@ -1040,6 +1056,7 @@ function initResizers() {
 (async function boot() {
   initResizers();
   applyPaneVisibility();
+  applyEditorFont();
   restoreTranscript();
   updateCtx();
   setStatus("loading…");

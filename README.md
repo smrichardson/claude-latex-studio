@@ -192,3 +192,12 @@ source line (with a brief highlight where you clicked). Powered by `latexmk -syn
 - Forward sync (cursor in editor → scroll/highlight the PDF).
 - Render `tabular`/`figure` in rich text.
 - Persist a session (open papers, scroll positions) across restarts.
+
+## License & trademark note
+
+MIT (see [LICENSE](LICENSE)).
+
+This is an **unofficial, community-built tool** that drives your own
+[Claude Code](https://docs.claude.com/en/docs/claude-code) installation — your
+login, your machine, your files. It is not affiliated with, sponsored, or
+endorsed by Anthropic. "Claude" is a trademark of Anthropic, PBC.
