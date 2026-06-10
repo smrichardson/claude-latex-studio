@@ -760,23 +760,84 @@ function addMsg(kind: "user" | "bot" | "sys", text: string): HTMLDivElement {
   return div;
 }
 
-// Persist user/bot turns so the transcript survives a refresh. (The conversation
-// itself continues via claudeSession / --resume; "New" resets both.)
-type Turn = { kind: "user" | "bot"; text: string };
+// Persist user/bot turns so the transcript survives a refresh — and make every
+// user turn a CHECKPOINT. Each Claude call resumes with --fork-session, so the
+// session id recorded before a turn stays frozen on disk forever; rewinding is
+// just "resume that old id + restore the .tex snapshot taken at send time".
+type Turn = {
+  kind: "user" | "bot";
+  text: string;
+  session?: string | null; // user turns: the session id active BEFORE this message
+  tex?: string; // user turns: the document at send time
+  texName?: string; // which .tex file the snapshot belongs to
+};
 let transcript: Turn[] = [];
 let claudeSession: string | null = localStorage.getItem("claudeSession"); // resume id for multi-turn memory
-function pushTurn(kind: "user" | "bot", text: string) {
-  transcript.push({ kind, text });
-  transcript = transcript.slice(-100);
-  localStorage.setItem("chat", JSON.stringify(transcript));
+
+function persistTranscript() {
+  // Cap stored size: keep tex snapshots only on the most recent 15 user turns.
+  const slim = transcript.slice(-100);
+  let snapshots = 0;
+  for (let i = slim.length - 1; i >= 0; i--) {
+    if (slim[i].tex != null && ++snapshots > 15) {
+      slim[i] = { ...slim[i], tex: undefined };
+    }
+  }
+  localStorage.setItem("chat", JSON.stringify(slim));
 }
+
+function pushTurn(turn: Turn) {
+  transcript.push(turn);
+  transcript = transcript.slice(-100);
+  persistTranscript();
+}
+
+/** Rewind to just before user turn `idx`: restore chat, session, and TeX. */
+async function rewindTo(idx: number) {
+  const t = transcript[idx];
+  if (!t || t.kind !== "user") return;
+  if (!confirm("Rewind to before this message? Later chat turns are discarded" + (t.tex != null ? " and the document is restored to that point." : "."))) return;
+  claudeSession = t.session ?? null;
+  if (claudeSession) localStorage.setItem("claudeSession", claudeSession);
+  else localStorage.removeItem("claudeSession");
+  transcript = transcript.slice(0, idx);
+  persistTranscript();
+  redrawTranscript();
+  addMsg("sys", "⏪ Rewound. The conversation continues from this point.");
+  // Put the original message back in the composer so it can be edited/resent.
+  promptEl.value = t.text.replace(/\n\n\[[^\]]*\]$/, "");
+  promptEl.focus();
+  if (t.tex != null) {
+    if (t.texName && t.texName !== activeTex) await openTex(t.texName);
+    setEditorContent(t.tex);
+    await saveAndCompile();
+  }
+}
+
+function renderTurn(t: Turn, idx: number) {
+  const div = addMsg(t.kind, t.text);
+  if (t.kind === "user") {
+    const rw = document.createElement("button");
+    rw.className = "rw";
+    rw.textContent = "⏪";
+    rw.title = "Rewind to before this message (restores the document too)";
+    rw.addEventListener("click", () => rewindTo(idx));
+    div.appendChild(rw);
+  }
+}
+
+function redrawTranscript() {
+  logEl.innerHTML = "";
+  transcript.forEach((t, i) => renderTurn(t, i));
+}
+
 function restoreTranscript() {
   try {
     transcript = JSON.parse(localStorage.getItem("chat") || "[]");
   } catch {
     transcript = [];
   }
-  for (const t of transcript) addMsg(t.kind, t.text);
+  redrawTranscript();
 }
 
 async function sendToClaude() {
@@ -788,8 +849,15 @@ async function sendToClaude() {
   promptEl.value = "";
   const tags = [paper ? `about: ${paper}` : "", capture ? "📎 highlighted region" : ""].filter(Boolean);
   const userText = prompt + (tags.length ? `\n\n[${tags.join("; ")}]` : "");
-  addMsg("user", userText);
-  pushTurn("user", userText);
+  // Checkpoint: the pre-send session id + document state make this turn rewindable.
+  pushTurn({
+    kind: "user",
+    text: userText,
+    session: claudeSession,
+    tex: view.state.doc.toString(),
+    texName: activeTex,
+  });
+  renderTurn(transcript[transcript.length - 1], transcript.length - 1);
   const pending = addMsg(
     "sys",
     mode === "edit"
@@ -818,7 +886,7 @@ async function sendToClaude() {
     }
     pending.remove();
     addMsg("bot", r.output || "(no output)");
-    pushTurn("bot", r.output || "(no output)");
+    pushTurn({ kind: "bot", text: r.output || "(no output)" });
 
     if (mode === "edit") {
       if (r.content != null && r.content !== view.state.doc.toString()) {
@@ -835,7 +903,8 @@ async function sendToClaude() {
 
 $("send").addEventListener("click", sendToClaude);
 promptEl.addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+  // Enter sends; Shift+Enter inserts a newline (Cmd/Ctrl+Enter still works).
+  if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendToClaude();
   }
@@ -849,13 +918,44 @@ $("new-chat").addEventListener("click", () => {
   addMsg("sys", "New conversation. Claude won't remember the previous chat.");
 });
 
+// --- panel visibility -------------------------------------------------------
+const paneEls = Array.from(document.querySelectorAll<HTMLElement>("#panes .pane"));
+const resizerEls = Array.from(document.querySelectorAll<HTMLElement>("#panes .resizer"));
+let panesVisible: boolean[] = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem("panesVisible") || "");
+    if (Array.isArray(v) && v.length === paneEls.length) return v;
+  } catch {
+    /* default below */
+  }
+  return paneEls.map(() => true);
+})();
+
+function applyPaneVisibility() {
+  paneEls.forEach((p, i) => p.classList.toggle("hidden", !panesVisible[i]));
+  // A resizer sits between panes i and i+1; only show it when both are visible.
+  resizerEls.forEach((r, i) => r.classList.toggle("hidden", !(panesVisible[i] && panesVisible[i + 1])));
+  panesVisible.forEach((v, i) => $(`pv-${i}`).classList.toggle("on", v));
+  localStorage.setItem("panesVisible", JSON.stringify(panesVisible));
+}
+
+function togglePane(i: number) {
+  if (panesVisible[i] && panesVisible.filter(Boolean).length === 1) return; // keep ≥1 visible
+  panesVisible[i] = !panesVisible[i];
+  applyPaneVisibility();
+  // PDF panes render at their container width — re-render after a size change.
+  if (panesVisible[0] && i === 0) paperPane.reRender();
+  if (panesVisible[2] && i === 2) compiledPane.reRender();
+}
+for (let i = 0; i < paneEls.length; i++) $(`pv-${i}`).addEventListener("click", () => togglePane(i));
+
 // --- resizable columns ----------------------------------------------------
 function initResizers() {
-  const panes = Array.from(document.querySelectorAll<HTMLElement>("#panes .pane"));
+  const panes = paneEls;
   panes.forEach((p) => {
     p.style.flex = `${p.dataset.grow ?? "1"} 1 0`;
   });
-  const resizers = Array.from(document.querySelectorAll<HTMLElement>("#panes .resizer"));
+  const resizers = resizerEls;
   resizers.forEach((rz, i) => {
     const left = panes[i];
     const right = panes[i + 1];
@@ -887,6 +987,7 @@ function initResizers() {
 // --- boot -----------------------------------------------------------------
 (async function boot() {
   initResizers();
+  applyPaneVisibility();
   restoreTranscript();
   updateCtx();
   setStatus("loading…");

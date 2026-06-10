@@ -77,6 +77,13 @@
 
       .resizer { flex: 0 0 6px; cursor: col-resize; background: var(--border); transition: background .1s; }
       .resizer:hover { background: var(--accent); }
+      .pane.hidden, .resizer.hidden { display: none; }
+      .pane-toggles { display: flex; gap: 4px; margin-right: 8px; }
+
+      /* rewind button on user chat messages (shown on hover) */
+      .msg.user { position: relative; }
+      .msg.user .rw { position: absolute; left: -26px; top: 6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 10px; line-height: 1; display: none; align-items: center; justify-content: center; }
+      .msg.user:hover .rw { display: inline-flex; }
 
       #chat { display: flex; flex-direction: column; height: 100%; }
       #log { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
@@ -100,6 +107,12 @@
         <button id="compile">Compile</button>
         <button id="toggle-rt" class="on">Rich Text: ON</button>
         <span class="spacer"></span>
+        <span class="pane-toggles">
+          <button id="pv-0" class="sm on" title="Show/hide the paper pane">Paper</button>
+          <button id="pv-1" class="sm on" title="Show/hide the editor">Editor</button>
+          <button id="pv-2" class="sm on" title="Show/hide the compiled PDF">PDF</button>
+          <button id="pv-3" class="sm on" title="Show/hide the Claude chat">Chat</button>
+        </span>
         <span id="status" class="status">ready</span>
         <select id="theme-select" title="Theme" style="margin-left:10px">
           <option value="manuscript">Manuscript</option>

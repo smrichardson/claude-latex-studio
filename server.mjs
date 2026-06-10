@@ -413,8 +413,9 @@ async function claude(req, res) {
   const args = ["-p", userPrompt, "--output-format", "json"];
 
   if (session) {
-    // Continue the existing conversation — it already has the system context.
-    args.push("--resume", session);
+    // Continue the conversation, forking to a NEW session id each turn. The old
+    // ids stay frozen on disk, so any past turn can be resumed later = rewind.
+    args.push("--resume", session, "--fork-session");
   } else {
     args.push(
       "--append-system-prompt",

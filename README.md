@@ -33,16 +33,19 @@ npm run dev          # then open http://localhost:4318
 npm run build && npm start   # then open http://localhost:4319
 ```
 
-### Run it as a Mac app (dock)
+### Run it as a real Mac app (dock)
 
 ```bash
 npm run build
-scripts/make-macos-app.sh     # creates "LaTeX Claude Studio.app"
+scripts/build-native-app.sh        # → /Applications/LaTeX Claude Studio.app
 ```
 
-Drag the generated `.app` to your Dock. Clicking it starts the server (if needed)
-and opens a chromeless app window. (The app is an AppleScript launcher around
-`scripts/launch.sh`; it's git-ignored because it bakes in this checkout's path.)
+This compiles a **native Swift/WKWebView app** (needs Xcode Command Line Tools —
+`swiftc`). It has its own window and Dock icon, starts the studio server itself
+if it isn't running, and supports file pickers and JS dialogs. Drag it to your
+Dock; add it to **System Settings → Login Items** if you want it at startup.
+(`scripts/make-macos-app.sh` still generates the older AppleScript/Chrome
+launcher as a fallback.)
 
 ## Projects & folder structure
 
@@ -116,7 +119,13 @@ persists (to `~/.latex-claude-studio.env`, which the dock app also reads).
   **display-math environments** (`equation`/`align`/`gather`/`multline`), and **theorem-like
   environments** (`remark`/`assumption`/… shown as a bold label). Click a line (or anywhere
   in a multi-line block) to reveal its raw LaTeX for editing.
-- Drag the column dividers to resize panes. `⌘/Ctrl+Enter` sends a chat message.
+- Drag the column dividers to resize panes, or **hide whole panes** with the
+  Paper / Editor / PDF / Chat toggles in the toolbar (persisted).
+- **Enter** sends a chat message (Shift+Enter for a newline).
+- **Rewind:** hover a chat message you sent and click **⏪** — the conversation,
+  Claude's memory, *and the document* roll back to just before that message
+  (every turn is checkpointed via `claude --fork-session` + a `.tex` snapshot),
+  and your original prompt lands back in the composer to edit and resend.
 - **Theme** picker (top-right): _Manuscript_ (warm paper), _Slate_ (neutral dark), or
   _B&W_ (crisp light). Your choice is remembered; `?theme=slate` also forces one.
 
