@@ -141,9 +141,26 @@ async function compile() {
   }
 }
 
+// Compiles must never overlap: two latexmk runs in one directory fight over the
+// aux files and the loser leaves a stale PDF. If a save lands mid-compile, we
+// queue exactly one follow-up run that picks up the latest content.
+let compileBusy = false;
+let compileQueued = false;
 async function saveAndCompile() {
-  await saveFile();
-  await compile();
+  if (compileBusy) {
+    compileQueued = true;
+    return;
+  }
+  compileBusy = true;
+  try {
+    do {
+      compileQueued = false;
+      await saveFile();
+      await compile();
+    } while (compileQueued);
+  } finally {
+    compileBusy = false;
+  }
 }
 
 /** Open a .tex file: load its content, make it the active file, compile it. */
@@ -154,7 +171,7 @@ async function openTex(name: string) {
   const { content } = await fetch(`/api/file?name=${encodeURIComponent(name)}`).then((x) => x.json());
   setEditorContent(content);
   saveStateEl.textContent = "saved";
-  await compile();
+  await saveAndCompile(); // through the compile lock (content just loaded → save is a no-op)
 }
 
 /** Populate the .tex file picker and open the remembered (or default) one. */
@@ -534,6 +551,20 @@ $("checkpoint-btn").addEventListener("click", async () => {
     .catch(() => ({ committed: false }));
   setStatus(r.committed ? "checkpoint committed ✓" : "no changes (or not a git repo)", r.committed ? "ok" : "");
 });
+$("repo-btn").addEventListener("click", async () => {
+  if (!confirm("Create a PRIVATE GitHub repo for this project and push it?")) return;
+  setStatus("creating GitHub repo…");
+  const r = await fetch("/api/make-repo", { method: "POST" })
+    .then((x) => x.json())
+    .catch(() => ({ ok: false, error: "request failed" }));
+  if (r.ok) {
+    setStatus(r.already ? "already on GitHub ✓" : "private repo created ✓", "ok");
+    addMsg("sys", (r.already ? "Already connected to GitHub: " : "Created private GitHub repo: ") + r.url);
+  } else {
+    setStatus("repo creation failed", "err");
+    addMsg("sys", `GitHub repo creation failed:\n${r.error || "(unknown error)"}`);
+  }
+});
 window.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault(); // Cmd/Ctrl+S = save now
@@ -554,7 +585,15 @@ async function refreshProjectLabel(): Promise<string> {
 }
 $("project-btn").addEventListener("click", async () => {
   const cur = await refreshProjectLabel();
-  const dir = prompt("Open project folder (absolute path):", cur);
+  // Native folder chooser first (⌘⇧G inside it types a path); prompt() only if
+  // the picker is unavailable (e.g. running headless / not on macOS).
+  let dir: string | null = null;
+  const picked = await fetch("/api/pick-folder", { method: "POST" })
+    .then((x) => x.json())
+    .catch(() => ({ ok: false, unavailable: true }));
+  if (picked.ok) dir = picked.dir;
+  else if (picked.cancelled) return;
+  else dir = prompt("Open project folder (absolute path):", cur);
   if (!dir || dir.trim() === cur) return;
   setStatus("switching project…");
   try {

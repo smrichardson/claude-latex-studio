@@ -69,14 +69,16 @@ STUDIO_MAIN="writeup.tex" STUDIO_PROJECT=... npm start   # if the main file isn'
 Scaffold a fresh one with `scripts/new-project.sh <path>`. Papers are discovered
 **recursively** under `papers/`, so you can organise them into subfolders.
 
-Or just click **📁 project** in the toolbar to switch folders at runtime — the choice
-persists (to `~/.latex-claude-studio.env`, which the dock app also reads).
+Or just click **📁 project** in the toolbar — it opens the native macOS folder
+chooser (press **⌘⇧G** inside it to type a path). The choice persists (to
+`~/.latex-claude-studio.env`, which the dock app also reads).
 
-**Git checkpoints (optional):** if the project folder is a git repo, the studio
-auto-commits after every Claude edit (message: `claude: <your prompt>`) and pushes
-in the background; the **📸** toolbar button commits a manual snapshot. Set it up
-once with `git init` + a GitHub remote (private for unpublished work) and your
-writing history takes care of itself.
+**Git checkpoints (optional):** click **⎇ GitHub** in the toolbar to turn the
+current project into a git repo with a **private** GitHub remote in one shot
+(init + `.gitignore` + commit + `gh repo create --private --push`; needs the
+`gh` CLI). From then on the studio auto-commits after every Claude edit
+(message: `claude: <your prompt>`) and pushes in the background; **📸** commits
+a manual snapshot anytime.
 
 ## Paper reading + writeup workflow
 
